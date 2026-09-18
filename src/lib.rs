@@ -25,6 +25,11 @@
 //! unsafe may live. A Kerberos ticket or an NTLM exchange is `kerberos`'s
 //! or `ntlm`'s to verify; this mechanism keeps its own name, `windows`, so
 //! an Acceptance can say which verifier a Location uses.
+//!
+//! The logon name is read by the identify capability's `UserPrincipalName`,
+//! so `CORP\alice` and `alice@corp` are one account, and a claim whose
+//! `principal.user` evidence names another account than the one it presents
+//! is refused naming both (ADR-0054).
 
 pub mod account;
 pub mod logon;
@@ -34,6 +39,7 @@ pub use logon::{InProcess, Logon, Outcome, UNREACHABLE, Unreachable};
 
 use authenticate::{AuthenticateError, Authenticator, Presented};
 use context::Verified;
+use identify::UserPrincipalName;
 use xcore::{Mechanism, mechanism};
 
 /// The proof name this verifier reads off a `Presented`.
@@ -112,6 +118,7 @@ impl Authenticator for WindowsAuthenticator {
             ))
         })?;
         let account = Account::parse(&presented.value, self.domain.as_deref())?;
+        same_account(&account, presented)?;
         match self.facility.logon(&account, password)? {
             Outcome::Success => Ok(Verified::Proven),
             Outcome::LogonFailure => Ok(Verified::Refused),
@@ -121,6 +128,23 @@ impl Authenticator for WindowsAuthenticator {
                 other.code()
             ))),
         }
+    }
+}
+
+/// Refuse a claim whose `principal.user` evidence names another account than
+/// the one it presents. Evidence is never proof: agreeing with it proves
+/// nothing, and the logon still decides.
+fn same_account(account: &Account, presented: &Presented) -> Result<(), AuthenticateError> {
+    let claimed = presented
+        .evidence
+        .iter()
+        .find(|(name, _)| name == identify::principal::USER)
+        .and_then(|(_, value)| UserPrincipalName::parse(value));
+    match (claimed, account.principal()) {
+        (Some(claimed), Some(read)) if !claimed.is(&read) => Err(AuthenticateError::new(format!(
+            "the claim presents '{read}' and its evidence names '{claimed}': not the same account"
+        ))),
+        _ => Ok(()),
     }
 }
 
@@ -205,7 +229,7 @@ mod tests {
             .expect_err("refused");
         assert_eq!(
             failure.message,
-            "the host refused to log 'CORP\\retired' on: ERROR_ACCOUNT_DISABLED (1331)"
+            "the host refused to log 'corp\\retired' on: ERROR_ACCOUNT_DISABLED (1331)"
         );
     }
 
@@ -231,6 +255,32 @@ mod tests {
         let failure = verifier().verify(&ticket).expect_err("refused");
         assert!(
             failure.message.contains("'kerberos'"),
+            "{}",
+            failure.message
+        );
+    }
+
+    #[test]
+    fn the_down_level_name_and_the_user_principal_name_log_the_same_account_on() {
+        let authority = InProcess::new(64).with_account(&account("jane@partnerx"), "pencil");
+        let verifier = WindowsAuthenticator::new().with_facility(authority);
+        let filed = claim("PARTNERX\\Jane", "pencil")
+            .with_evidence(identify::principal::USER, "jane@partnerx");
+        assert_eq!(verifier.verify(&filed).expect("verified"), Verified::Proven);
+        let principal = claim("jane@PartnerX", "pencil");
+        assert_eq!(
+            verifier.verify(&principal).expect("verified"),
+            Verified::Proven
+        );
+    }
+
+    #[test]
+    fn evidence_of_another_account_than_the_one_presented_is_refused_naming_both() {
+        let filed =
+            claim("CORP\\alice", "pencil").with_evidence(identify::principal::USER, "mallory@corp");
+        let failure = verifier().verify(&filed).expect_err("refused");
+        assert!(
+            failure.message.contains("'alice@corp'") && failure.message.contains("'mallory@corp'"),
             "{}",
             failure.message
         );

@@ -203,7 +203,7 @@ mod tests {
             failure.message
         );
         assert!(
-            failure.message.contains("'CORP\\alice'"),
+            failure.message.contains("'corp\\alice'"),
             "{}",
             failure.message
         );
