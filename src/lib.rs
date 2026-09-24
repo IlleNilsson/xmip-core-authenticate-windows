@@ -40,10 +40,8 @@ pub use logon::{InProcess, Logon, Outcome, UNREACHABLE, Unreachable};
 use authenticate::{AuthenticateError, Authenticator, Presented};
 use context::Verified;
 use identify::UserPrincipalName;
+use identify::evidence::{self, PASSWORD};
 use xcore::{Mechanism, mechanism};
-
-/// The proof name this verifier reads off a `Presented`.
-pub const PROOF: &str = "password";
 
 /// Verifies a `username` claim with a `password` proof through the host's
 /// logon facility.
@@ -111,9 +109,9 @@ impl Authenticator for WindowsAuthenticator {
                 presented.mechanism.name()
             )));
         }
-        let password = presented.proof(PROOF).ok_or_else(|| {
+        let password = presented.proof(evidence::PASSWORD).ok_or_else(|| {
             AuthenticateError::new(format!(
-                "no '{PROOF}' proof was presented with the username '{}'",
+                "no '{PASSWORD}' proof was presented with the username '{}'",
                 presented.value
             ))
         })?;
@@ -138,7 +136,7 @@ fn same_account(account: &Account, presented: &Presented) -> Result<(), Authenti
     let claimed = presented
         .evidence
         .iter()
-        .find(|(name, _)| name == identify::principal::USER)
+        .find(|(name, _)| name == evidence::PRINCIPAL_USER)
         .and_then(|(_, value)| UserPrincipalName::parse(value));
     match (claimed, account.principal()) {
         (Some(claimed), Some(read)) if !claimed.is(&read) => Err(AuthenticateError::new(format!(
@@ -169,7 +167,7 @@ mod tests {
     }
 
     fn claim(username: &str, password: &str) -> Presented {
-        Presented::passed(mechanism::username(), username).with_proof(PROOF, password)
+        Presented::passed(mechanism::username(), username).with_proof(evidence::PASSWORD, password)
     }
 
     #[test]
@@ -202,7 +200,8 @@ mod tests {
             );
         }
         // A claim the first gate already filed under this mechanism reads too.
-        let filed = Presented::passed(mechanism::windows(), "alice").with_proof(PROOF, "pencil");
+        let filed = Presented::passed(mechanism::windows(), "alice")
+            .with_proof(evidence::PASSWORD, "pencil");
         assert_eq!(verifier.verify(&filed).expect("verified"), Verified::Proven);
     }
 
@@ -265,7 +264,7 @@ mod tests {
         let authority = InProcess::new(64).with_account(&account("jane@partnerx"), "pencil");
         let verifier = WindowsAuthenticator::new().with_facility(authority);
         let filed = claim("PARTNERX\\Jane", "pencil")
-            .with_evidence(identify::principal::USER, "jane@partnerx");
+            .with_evidence(evidence::PRINCIPAL_USER, "jane@partnerx");
         assert_eq!(verifier.verify(&filed).expect("verified"), Verified::Proven);
         let principal = claim("jane@PartnerX", "pencil");
         assert_eq!(
@@ -277,7 +276,7 @@ mod tests {
     #[test]
     fn evidence_of_another_account_than_the_one_presented_is_refused_naming_both() {
         let filed =
-            claim("CORP\\alice", "pencil").with_evidence(identify::principal::USER, "mallory@corp");
+            claim("CORP\\alice", "pencil").with_evidence(evidence::PRINCIPAL_USER, "mallory@corp");
         let failure = verifier().verify(&filed).expect_err("refused");
         assert!(
             failure.message.contains("'alice@corp'") && failure.message.contains("'mallory@corp'"),
@@ -297,8 +296,8 @@ mod tests {
     #[test]
     fn through_the_gate_the_refusal_carries_the_reason_to_the_operator() {
         let acceptance = Acceptance::closed().accepting(&mechanism::windows());
-        let filed =
-            Presented::passed(mechanism::windows(), "CORP\\alice").with_proof(PROOF, "pencil");
+        let filed = Presented::passed(mechanism::windows(), "CORP\\alice")
+            .with_proof(evidence::PASSWORD, "pencil");
 
         let bound = verifier();
         let identity = authenticate(&acceptance, &[&bound], &Registry, &filed).expect("accepted");
