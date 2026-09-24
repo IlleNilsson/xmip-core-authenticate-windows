@@ -37,8 +37,9 @@ pub mod logon;
 pub use account::Account;
 pub use logon::{InProcess, Logon, Outcome, UNREACHABLE, Unreachable};
 
-use authenticate::{AuthenticateError, Authenticator, Presented};
+use authenticate::{AuthenticateError, Authenticator};
 use context::Verified;
+use identify::Presented;
 use identify::UserPrincipalName;
 use identify::evidence::{self, PASSWORD};
 use xcore::{Mechanism, mechanism};
