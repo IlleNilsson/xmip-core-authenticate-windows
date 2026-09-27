@@ -40,7 +40,6 @@ pub use logon::{InProcess, Logon, Outcome, UNREACHABLE, Unreachable};
 use authenticate::{AuthenticateError, Authenticator};
 use context::Verified;
 use identify::Presented;
-use identify::UserPrincipalName;
 use identify::evidence::{self, PASSWORD};
 use xcore::{Mechanism, mechanism};
 
@@ -91,25 +90,13 @@ impl WindowsAuthenticator {
     }
 }
 
-/// Whether a claim is one this verifier reads: a bare `username`, or one
-/// the first gate already filed under `windows`.
-fn reads(mechanism: &Mechanism) -> bool {
-    let name = mechanism.name();
-    name == "username" || name == "windows"
-}
-
 impl Authenticator for WindowsAuthenticator {
     fn mechanism(&self) -> Mechanism {
         mechanism::windows()
     }
 
     fn verify(&self, presented: &Presented) -> Result<Verified, AuthenticateError> {
-        if !reads(&presented.mechanism) {
-            return Err(AuthenticateError::new(format!(
-                "'{}' is not a claim the Windows verifier reads: it takes a username",
-                presented.mechanism.name()
-            )));
-        }
+        authenticate::account::user_claim(presented, &self.mechanism())?;
         let password = presented.proof(evidence::PASSWORD).ok_or_else(|| {
             AuthenticateError::new(format!(
                 "no '{PASSWORD}' proof was presented with the username '{}'",
@@ -117,7 +104,9 @@ impl Authenticator for WindowsAuthenticator {
             ))
         })?;
         let account = Account::parse(&presented.value, self.domain.as_deref())?;
-        same_account(&account, presented)?;
+        if let Some(read) = account.principal() {
+            authenticate::account::same_account(presented, &read)?;
+        }
         match self.facility.logon(&account, password)? {
             Outcome::Success => Ok(Verified::Proven),
             Outcome::LogonFailure => Ok(Verified::Refused),
@@ -127,23 +116,6 @@ impl Authenticator for WindowsAuthenticator {
                 other.code()
             ))),
         }
-    }
-}
-
-/// Refuse a claim whose `principal.user` evidence names another account than
-/// the one it presents. Evidence is never proof: agreeing with it proves
-/// nothing, and the logon still decides.
-fn same_account(account: &Account, presented: &Presented) -> Result<(), AuthenticateError> {
-    let claimed = presented
-        .evidence
-        .iter()
-        .find(|(name, _)| name == evidence::PRINCIPAL_USER)
-        .and_then(|(_, value)| UserPrincipalName::parse(value));
-    match (claimed, account.principal()) {
-        (Some(claimed), Some(read)) if !claimed.is(&read) => Err(AuthenticateError::new(format!(
-            "the claim presents '{read}' and its evidence names '{claimed}': not the same account"
-        ))),
-        _ => Ok(()),
     }
 }
 
