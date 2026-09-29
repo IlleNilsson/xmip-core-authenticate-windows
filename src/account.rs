@@ -139,13 +139,13 @@ mod tests {
 
     #[test]
     fn the_down_level_name_and_the_user_principal_name_are_the_same_account() {
-        let down_level = Account::parse("PARTNERX\\jane", None).expect("read");
-        let principal = Account::parse("Jane@partnerx", None).expect("read");
-        let bare = Account::parse("JANE", Some("PartnerX")).expect("read");
+        let down_level = Account::parse("PARTYX\\jane", None).expect("read");
+        let principal = Account::parse("Jane@partyx", None).expect("read");
+        let bare = Account::parse("JANE", Some("PartyX")).expect("read");
         assert!(down_level.is(&principal));
         assert!(principal.is(&bare));
         let name = down_level.principal().expect("in a domain");
-        assert_eq!(name.to_string(), "jane@partnerx");
+        assert_eq!(name.to_string(), "jane@partyx");
 
         let local = Account::parse("jane", None).expect("read");
         assert_eq!(local.principal(), None);
