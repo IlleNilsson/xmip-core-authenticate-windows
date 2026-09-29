@@ -234,12 +234,12 @@ mod tests {
 
     #[test]
     fn the_down_level_name_and_the_user_principal_name_log_the_same_account_on() {
-        let authority = InProcess::new(64).with_account(&account("jane@partnerx"), "pencil");
+        let authority = InProcess::new(64).with_account(&account("jane@partyx"), "pencil");
         let verifier = WindowsAuthenticator::new().with_facility(authority);
-        let filed = claim("PARTNERX\\Jane", "pencil")
-            .with_evidence(evidence::PRINCIPAL_USER, "jane@partnerx");
+        let filed =
+            claim("PARTYX\\Jane", "pencil").with_evidence(evidence::PRINCIPAL_USER, "jane@partyx");
         assert_eq!(verifier.verify(&filed).expect("verified"), Verified::Proven);
-        let principal = claim("jane@PartnerX", "pencil");
+        let principal = claim("jane@PartyX", "pencil");
         assert_eq!(
             verifier.verify(&principal).expect("verified"),
             Verified::Proven
